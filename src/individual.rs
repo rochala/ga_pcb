@@ -1,17 +1,28 @@
 use self::Direction::*;
+use colored::*;
 use rand::Rng;
+use std::fmt;
 
 const COLLISION_FACTOR: f32 = 0.1;
 const SIDE_FACTOR: f32 = 0.;
 const STEP_BONUS: f32 = 0.1;
 const BASE: f32 = 1.;
 
-const WEIGHTS: (f32, f32, f32) = (0.5, 0.3, 0.2);
+const WEIGHTS: (f32, f32, f32) = (10., 2., 1.);
 
+#[derive(Clone)]
 pub struct Individual {
-    pub connections: Vec<Connection>,
+    connections: Vec<Connection>,
     pub point_map: Vec<Vec<bool>>,
     pub collisions: u8,
+}
+
+pub fn generate_empty_individual() -> Individual {
+    Individual {
+        connections: vec![],
+        point_map: vec![],
+        collisions: 0,
+    }
 }
 
 pub fn generate_individual(
@@ -34,13 +45,11 @@ pub fn generate_individual(
         individual.connections.push(connection);
     }
 
-    // println!("{}", individual.collisions);
-
     individual
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum Direction {
+enum Direction {
     North,
     South,
     East,
@@ -48,23 +57,23 @@ pub enum Direction {
 }
 
 impl Direction {
-    pub fn iterator() -> impl Iterator<Item = Direction> {
+    fn iterator() -> impl Iterator<Item = Direction> {
         [North, South, East, West].iter().copied()
     }
 }
 
-#[derive(Debug)]
-pub struct Segment {
+#[derive(Debug, Clone)]
+struct Segment {
     length: u8,
     direction: Direction,
 }
 
-#[derive(Debug)]
-pub struct Connection {
+#[derive(Debug, Clone)]
+struct Connection {
     start: (u8, u8),
     end: (u8, u8),
     actual_point: (u8, u8),
-    pub segments: Vec<Segment>,
+    segments: Vec<Segment>,
 }
 
 impl Individual {
@@ -96,7 +105,7 @@ impl Individual {
         neighbors
     }
 
-    pub fn random_walk(&mut self, pins: ((u8, u8), (u8, u8))) -> Connection {
+    fn random_walk(&mut self, pins: ((u8, u8), (u8, u8))) -> Connection {
         let mut connection = Connection {
             start: pins.0,
             end: pins.1,
@@ -120,8 +129,6 @@ impl Individual {
 
         let roll: f32 = rand::thread_rng().gen();
 
-        // println!("Prawdy {:?}", probabilities);
-
         if roll <= probabilities[0] {
             next_direction = North;
         } else if roll <= probabilities[0] + probabilities[1] {
@@ -135,11 +142,10 @@ impl Individual {
         while connection.actual_point != connection.end {
             let (segment, dir_holder) = connection.create_segment(next_direction, self);
             next_direction = dir_holder;
-            // println!("Moved: {:?} by {:?}", segment.direction, segment.length);
             connection.segments.push(segment);
         }
-        // println!("finish");
-        // println!("{:?}", self.point_map);
+
+        self.mark_point(pins.1, true);
 
         connection
     }
@@ -153,15 +159,129 @@ impl Individual {
 
     pub fn evaluate(&self) -> f32 {
         let mut connection_length = 0;
+        let mut segment_number = 0;
+
         for connection in self.connections.as_slice() {
             for segment in connection.segments.as_slice() {
                 connection_length += segment.length;
             }
+            segment_number += connection.segments.len();
         }
 
         self.collisions as f32 * WEIGHTS.0
             + connection_length as f32 * WEIGHTS.1
-            + self.connections.len() as f32 * WEIGHTS.2
+            + segment_number as f32 * WEIGHTS.2
+    }
+}
+
+impl fmt::Display for Individual {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fn match_dir(dir: Direction, symbols: (char, char, char, char)) -> String {
+            String::from(match dir {
+                North => String::from(symbols.0),
+                South => String::from(symbols.1),
+                East => String::from(symbols.2),
+                West => String::from(symbols.3),
+            })
+        }
+
+        let mut character_map = vec![
+            vec![
+                String::from('\u{2219}').color("white");
+                self.point_map.first().unwrap().len() as usize
+            ];
+            self.point_map.len() as usize
+        ];
+
+        let color = ["red", "green", "yellow", "blue", "magenta", "cyan", "white"];
+
+        for c in 0..self.connections.len() {
+            let mut actual_point = self.connections[c].start;
+            character_map[actual_point.0 as usize][actual_point.1 as usize] = match_dir(
+                self.connections[c].segments.first().unwrap().direction,
+                ('\u{2568}', '\u{2565}', '\u{255E}', '\u{2561}'),
+            )
+            .color(color[c % color.len()]);
+
+            for i in 0..self.connections[c].segments.len() {
+                for j in 1..self.connections[c].segments[i].length {
+                    match self.connections[c].segments[i].direction {
+                        North => {
+                            character_map[(actual_point.0 - j) as usize][actual_point.1 as usize] =
+                                String::from('\u{2551}').color(color[c % color.len()]);
+                        }
+                        South => {
+                            character_map[(actual_point.0 + j) as usize][actual_point.1 as usize] =
+                                String::from('\u{2551}').color(color[c % color.len()]);
+                        }
+                        East => {
+                            character_map[actual_point.0 as usize][(actual_point.1 + j) as usize] =
+                                String::from('\u{2550}').color(color[c % color.len()]);
+                        }
+                        West => {
+                            character_map[actual_point.0 as usize][(actual_point.1 - j) as usize] =
+                                String::from('\u{2550}').color(color[c % color.len()]);
+                        }
+                    };
+                }
+                match self.connections[c].segments[i].direction {
+                    North => actual_point.0 -= self.connections[c].segments[i].length,
+                    South => actual_point.0 += self.connections[c].segments[i].length,
+                    East => actual_point.1 += self.connections[c].segments[i].length,
+                    West => actual_point.1 -= self.connections[c].segments[i].length,
+                }
+
+                if i < self.connections[c].segments.len() - 1 {
+                    match self.connections[c].segments[i + 1].direction {
+                        North => {
+                            character_map[actual_point.0 as usize][(actual_point.1) as usize] =
+                                match_dir(
+                                    self.connections[c].segments[i].direction,
+                                    ('\u{2551}', '\u{2551}', '\u{255D}', '\u{255A}'),
+                                )
+                                .color(color[c % color.len()]);
+                        }
+                        South => {
+                            character_map[actual_point.0 as usize][(actual_point.1) as usize] =
+                                match_dir(
+                                    self.connections[c].segments[i].direction,
+                                    ('\u{2551}', '\u{2551}', '\u{2557}', '\u{2554}'),
+                                )
+                                .color(color[c % color.len()]);
+                        }
+                        East => {
+                            character_map[actual_point.0 as usize][(actual_point.1) as usize] =
+                                match_dir(
+                                    self.connections[c].segments[i].direction,
+                                    ('\u{2554}', '\u{255A}', '\u{2550}', '\u{2550}'),
+                                )
+                                .color(color[c % color.len()]);
+                        }
+                        West => {
+                            character_map[actual_point.0 as usize][(actual_point.1) as usize] =
+                                match_dir(
+                                    self.connections[c].segments[i].direction,
+                                    ('\u{2557}', '\u{255D}', '\u{2550}', '\u{2550}'),
+                                )
+                                .color(color[c % color.len()]);
+                        }
+                    }
+                }
+            }
+
+            character_map[actual_point.0 as usize][actual_point.1 as usize] = match_dir(
+                self.connections[c].segments.last().unwrap().direction,
+                ('\u{2565}', '\u{2568}', '\u{2561}', '\u{255E}'),
+            )
+            .color(color[c % color.len()]);
+        }
+
+        Ok(for i in character_map {
+            for j in i {
+                write!(f, "{}", &j).expect("Fail");
+            }
+            write!(f, "\n").expect("Fail");
+        })
     }
 }
 
@@ -171,8 +291,6 @@ impl Connection {
         direction: Direction,
         individual: &mut Individual,
     ) -> (Segment, Direction) {
-        //zwracamy segment + kierunek w ktorym ma byc kolejny
-
         let mut segment = Segment {
             length: 1,
             direction,
@@ -195,7 +313,6 @@ impl Connection {
             );
             let roll: f32 = rand::thread_rng().gen();
 
-            //logika tworzenia segmentu
             if roll <= probabilities[0] {
                 individual.mark_point(self.actual_point, true);
                 match segment.direction {
@@ -238,7 +355,7 @@ impl Connection {
     }
 }
 
-pub fn move_direction(point: (u8, u8), direction: Direction) -> (u8, u8) {
+fn move_direction(point: (u8, u8), direction: Direction) -> (u8, u8) {
     match direction {
         North => {
             if point.0 == 0 {
@@ -259,7 +376,7 @@ pub fn move_direction(point: (u8, u8), direction: Direction) -> (u8, u8) {
     }
 }
 
-pub fn distance_factor(start: (u8, u8), end: (u8, u8)) -> f32 {
+fn distance_factor(start: (u8, u8), end: (u8, u8)) -> f32 {
     let distance =
         (end.0 as i8 - start.0 as i8).abs() as f32 + (end.1 as i8 - start.1 as i8).abs() as f32;
     if distance == 0. {
@@ -269,8 +386,7 @@ pub fn distance_factor(start: (u8, u8), end: (u8, u8)) -> f32 {
     }
 }
 
-// North South East West
-pub fn get_probability(
+fn get_probability(
     points: ((u8, u8), (u8, u8)),
     neighbors: [f32; 4],
     previous_direction: Direction,
