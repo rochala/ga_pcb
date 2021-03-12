@@ -24,5 +24,3 @@ fn main() {
     println!("{}", now.elapsed().as_millis());
 }
 
-// budowanie osobnika
-// wczytanie problemu -> zaladowanie punktodo stworzenia, mapa punktow,
