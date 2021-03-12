@@ -41,6 +41,7 @@ pub fn load_problem(problem_name: &str) -> Problem {
         }
     }
 
+
     Problem {
         dimensions,
         pin_locations,

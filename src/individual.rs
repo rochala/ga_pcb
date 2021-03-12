@@ -2,13 +2,15 @@ use self::Direction::*;
 use colored::*;
 use rand::Rng;
 use std::fmt;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 
 const COLLISION_FACTOR: f32 = 0.1;
 const SIDE_FACTOR: f32 = 0.;
 const STEP_BONUS: f32 = 0.1;
 const BASE: f32 = 1.;
 
-const WEIGHTS: (f32, f32, f32) = (10., 2., 1.);
+const WEIGHTS: (f32, f32, f32) = (10., 0.02, 0.01);
 
 #[derive(Clone)]
 pub struct Individual {
@@ -17,17 +19,9 @@ pub struct Individual {
     pub collisions: u8,
 }
 
-pub fn generate_empty_individual() -> Individual {
-    Individual {
-        connections: vec![],
-        point_map: vec![],
-        collisions: 0,
-    }
-}
-
 pub fn generate_individual(
     dimensions: (u8, u8),
-    pin_locations: Vec<((u8, u8), (u8, u8))>,
+    mut pin_locations: Vec<((u8, u8), (u8, u8))>,
 ) -> Individual {
     let mut individual = Individual {
         connections: Vec::new(),
@@ -39,6 +33,8 @@ pub fn generate_individual(
         individual.mark_point(pin_pair.0, true);
         individual.mark_point(pin_pair.1, true);
     }
+
+    pin_locations.shuffle(&mut thread_rng());
 
     for pin_pair in &pin_locations {
         let connection = individual.random_walk(*pin_pair);
@@ -77,6 +73,14 @@ struct Connection {
 }
 
 impl Individual {
+    pub fn new() -> Individual {
+        Individual {
+            connections: vec![],
+            point_map: vec![],
+            collisions: 0,
+        }
+    }
+
     fn find_neighbors(&self, point: (u8, u8)) -> [f32; 4] {
         // Up, DOWN, RIGHT, LEFT
         let mut neighbors: [f32; 4] = [1.0; 4];

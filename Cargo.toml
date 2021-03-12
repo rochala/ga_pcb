@@ -9,3 +9,5 @@ edition = "2018"
 [dependencies]
 rand = "0.8.3"
 colored = "2.0.0"
+indicatif = "0.15.0"
+num_cpus = "1.13.0"
