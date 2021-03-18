@@ -32,7 +32,6 @@ pub fn generate_individual(
         individual.mark_point(pin_pair.0, true);
         individual.mark_point(pin_pair.1, true);
     }
-
     // pin_locations.shuffle(&mut thread_rng());
 
     for pin_pair in &pin_locations {
@@ -158,6 +157,25 @@ impl Individual {
         self.collisions as f32 * WEIGHTS.0
             + connection_length as f32 * WEIGHTS.1
             + segment_number as f32 * WEIGHTS.2
+    }
+
+    pub fn crossover(&mut self, other: &Self, roll: f32) {
+        let index = (roll * self.connections.len() as f32) as usize;
+        self.connections[index] = other.connections[index].clone();
+    }
+
+    pub fn mutate(&mut self, random: &mut StdRng, mutation_chance: f32) {
+        for connection in &mut self.connections {
+            if random.gen::<f32>() < mutation_chance {
+                connection.mutate_segment(
+                    (random.gen::<f32>(), random.gen::<f32>()),
+                    (
+                        self.point_map.len() as u32,
+                        self.point_map[0].len() as u32,
+                    ),
+                )
+            }
+        }
     }
 }
 
@@ -286,7 +304,6 @@ impl Direction {
     }
 }
 
-
 #[derive(Debug, Clone, Copy)]
 struct Segment {
     length: u32,
@@ -399,14 +416,22 @@ impl Connection {
         new_segments.push(self.segments[0]);
 
         for i in 1..self.segments.len() {
+            // println!("Stary {:?}", self.segments);
+            // println!("Nowy {:?}", new_segments);
             if new_segments.len() == 0 {
+                new_segments.push(self.segments[i]);
+            } else if new_segments.len() == 1 && new_segments[0].length == 0 {
+                new_segments.pop();
                 new_segments.push(self.segments[i]);
             } else {
                 if self.segments[i].direction == new_segments.last().unwrap().direction {
                     new_segments.last_mut().unwrap().length += self.segments[i].length;
-                } else if self.segments[i].direction == invert_direction(new_segments.last().unwrap().direction) {
+                } else if self.segments[i].direction
+                    == invert_direction(new_segments.last().unwrap().direction)
+                {
                     if self.segments[i].length > new_segments.last().unwrap().length {
-                        new_segments.last_mut().unwrap().length = self.segments[i].length - new_segments.last().unwrap().length;
+                        new_segments.last_mut().unwrap().length =
+                            self.segments[i].length - new_segments.last().unwrap().length;
                         new_segments.last_mut().unwrap().direction = self.segments[i].direction;
                     } else if self.segments[i].length == new_segments.last().unwrap().length {
                         new_segments.pop();
@@ -423,12 +448,13 @@ impl Connection {
     }
 
     pub fn mutate_segment(&mut self, roll: (f32, f32), dimensions: (u32, u32)) {
-        let index = (roll.0 * 100.0) as usize % self.segments.len();
+        let index = (roll.0 * self.segments.len() as f32) as usize;
         let mutant: &Segment = &self.segments[index];
         let segment_point = self.find_point(index);
 
-        let mut mutation_value = (roll.1 * 4.) as u32;
+        let mut mutation_value = (roll.1 * 4.) as u32 + 1;
         let direction: Option<Direction>;
+        // println!("{}", index);
 
         match mutant.direction {
             North | South => {
@@ -461,6 +487,8 @@ impl Connection {
             }
         }
 
+        // println!("{}", mutation_value);
+
         if direction.is_none() {
             panic!("Direction is uninitialized");
         }
@@ -479,6 +507,8 @@ impl Connection {
                 direction: invert_direction(direction.unwrap()),
             },
         );
+
+        // println!("{:?}", self.segments);
 
         self.flatten();
     }
@@ -564,7 +594,6 @@ fn get_probability(
     }
     probabilities
 }
-
 
 fn invert_direction(direction: Direction) -> Direction {
     match direction {

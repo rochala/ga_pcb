@@ -15,7 +15,7 @@ fn test_mutation() {
     individual.connections[0].mutate_segment((0.3, 0.7), (6, 6));
     println!("{}", individual);
 
-    for i in 0..10000 {
+    for i in 0..100000 {
         let mut pin_locations = vec![];
         pin_locations.push(((1, 3), (5, 3)));
         individual = generate_individual((6, 6), pin_locations, Some(i));
@@ -24,6 +24,22 @@ fn test_mutation() {
         println!("{}", individual);
         println!("------------------------------");
     }
+
+//     individual.connections[0] = Connection{
+//         start: (2,2),
+//         end: (5,2),
+//         segments: vec![
+//             Segment{length: 1, direction: South},
+//             Segment{length: 1, direction: East},
+//             Segment{length: 1, direction: South},
+//             Segment{length: 1, direction: West},
+//             Segment{length: 1, direction: South},
+//         ],
+//     };
+//     println!("{}", individual);
+//     individual.connections[0].mutate_segment((0.23, 0.2), (6, 6));
+//     println!("{:?}", individual.connections[0]);
+//     println!("{}", individual);
 }
 
 #[test]

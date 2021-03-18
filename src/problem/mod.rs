@@ -4,6 +4,8 @@ mod individual;
 use individual::*;
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use rand::seq::SliceRandom;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
@@ -11,27 +13,105 @@ use std::time::Instant;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
-
+const CROSSOVER: f32 = 0.8;
+const MUTATION: f32 = 0.03;
+const ITERATIONS: u32 = 100;
+const POPULATION: usize = 1000;
+const BATCH_SIZE: usize = 20;
 
 pub struct Problem {
     dimensions: (u32, u32),
     pin_locations: Vec<((u32, u32), (u32, u32))>,
-    population: Vec<Individual>,
+    population: Vec<(Individual, f32)>,
     random: Option<u64>,
 }
 
+type FnType = fn(problem: &mut Problem, batch_size: usize, random: &mut StdRng) -> Individual;
+
+pub fn tournament_selection(
+    problem: &mut Problem,
+    batch_size: usize,
+    random: &mut StdRng,
+) -> Individual {
+    let mut tournament_batch: Vec<(Individual, f32)> = problem
+        .population
+        .choose_multiple(random, batch_size)
+        .cloned()
+        .collect();
+    // tournament_batch
+    //     .choose_weighted_mut(random, |item| 1. / item.evaluate())
+    //     .unwrap()
+    //     .clone()
+    //
+    // tournament_batch.iter().min_by(|item1, item2| (item1.evaluate().partial_cmp(&item2.evaluate())).unwrap()).unwrap().clone()
+    tournament_batch
+        .iter()
+        .min_by(|item1, item2| item1.1.partial_cmp(&item2.1).unwrap())
+        .unwrap()
+        .0
+        .clone()
+}
+
+pub fn roulette_selection() {}
+
 impl Problem {
-    pub fn init_population(&mut self, size: usize) {
+    fn init_population(&mut self, size: usize) {
+        let bar = ProgressBar::new(size as u64);
+        let sty = ProgressStyle::default_bar()
+            .template("{prefix:.cyan}   [{bar:40.white}] {pos:>7}/{len:7} [{elapsed_precise}]")
+            .progress_chars("=> ");
+        bar.set_style(sty);
+        bar.set_prefix("Generating population #");
+
         for i in 0..size {
-            self.population.push(generate_individual(
+            let individual: Individual = generate_individual(
                 self.dimensions.clone(),
                 self.pin_locations.clone(),
-                Some(self.random.unwrap() + i as u64),
-            ))
+                match self.random {
+                    Some(seed) => Some(seed + i as u64),
+                    None => None,
+                },
+            );
+            let points = individual.evaluate();
+            self.population.push((individual, points));
+            bar.inc(1);
         }
+        bar.finish();
     }
 
-    pub fn genetic_search(&mut self, selector: &dyn Fn(Vec<Individual>) -> Vec<Individual>, cpus: Option<usize>) {
+    pub fn genetic_search(&mut self, selector: FnType, cpus: Option<usize>, seed: Option<u64>) -> (Individual, f32) {
+        let mut random = match seed {
+            Some(seed) => StdRng::seed_from_u64(seed),
+            None => StdRng::from_entropy(),
+        };
+
+        self.init_population(POPULATION);
+
+        let bar = ProgressBar::new(ITERATIONS as u64);
+        let sty = ProgressStyle::default_bar()
+            .template("{prefix:.cyan}   [{bar:40.white}] {pos:>7}/{len:7} [{elapsed_precise}]")
+            .progress_chars("=> ");
+        bar.set_style(sty);
+        bar.set_prefix("Iterating #");
+
+        for _ in 0..ITERATIONS {
+            let mut new_population: Vec<(Individual, f32)> = vec![];
+            while new_population.len() < POPULATION {
+                let mut i1 = selector(self, BATCH_SIZE, &mut random);
+                if random.gen::<f32>() < CROSSOVER {
+                    let mut i2 = selector(self, BATCH_SIZE, &mut random);
+                    i1.crossover(&mut i2, random.gen());
+                }
+                i1.mutate(&mut random, MUTATION);
+                let points = i1.evaluate();
+                new_population.push((i1, points));
+            }
+            self.population = new_population;
+            bar.inc(1);
+        }
+
+
+       self.population.iter().min_by(|item1, item2| (item1.1.partial_cmp(&item2.1)).unwrap()).unwrap().clone()
     }
 
     pub fn random_search(&mut self, iterations: u64, cpus: Option<usize>) -> (Individual, u128) {
