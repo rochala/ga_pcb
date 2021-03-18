@@ -2,9 +2,10 @@ use Direction::*;
 
 use colored::*;
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use std::collections::HashMap;
 use std::fmt;
 
-const WEIGHTS: (f32, f32, f32) = (10., 0.2, 0.01);
+const WEIGHTS: (f32, f32, f32) = (100., 0.2, 0.1);
 
 const COLLISION_FACTOR: f32 = 0.1;
 const SIDE_FACTOR: f32 = 0.;
@@ -14,8 +15,7 @@ const BASE: f32 = 1.;
 #[derive(Clone, Debug)]
 pub struct Individual {
     connections: Vec<Connection>,
-    pub point_map: Vec<Vec<bool>>,
-    pub collisions: u64,
+    dimensions: (u32, u32),
 }
 
 pub fn generate_individual(
@@ -25,17 +25,19 @@ pub fn generate_individual(
 ) -> Individual {
     let mut individual = Individual {
         connections: Vec::new(),
-        point_map: vec![vec![false; dimensions.1 as usize]; dimensions.0 as usize],
-        collisions: 0,
+        dimensions,
     };
+
+    let mut point_map = vec![vec![false; dimensions.1 as usize]; dimensions.0 as usize];
+
     for pin_pair in &pin_locations {
-        individual.mark_point(pin_pair.0, true);
-        individual.mark_point(pin_pair.1, true);
+        individual.mark_point(pin_pair.0, true, &mut point_map);
+        individual.mark_point(pin_pair.1, true, &mut point_map);
     }
     // pin_locations.shuffle(&mut thread_rng());
 
     for pin_pair in &pin_locations {
-        let connection = individual.random_walk(*pin_pair, seed);
+        let connection = individual.random_walk(*pin_pair, seed, &mut point_map);
         individual.connections.push(connection);
     }
 
@@ -46,53 +48,57 @@ impl Individual {
     pub fn new() -> Individual {
         Individual {
             connections: vec![],
-            point_map: vec![],
-            collisions: 0,
+            dimensions: (0, 0),
         }
     }
 
-    fn find_neighbors(&self, point: (u32, u32)) -> [f32; 4] {
+    fn find_neighbors(&self, point: (u32, u32), point_map: &Vec<Vec<bool>>) -> [f32; 4] {
         // Up, DOWN, RIGHT, LEFT
         let mut neighbors: [f32; 4] = [1.0; 4];
 
         if point.0 <= 0 {
             neighbors[0] = SIDE_FACTOR;
-        } else if self.point_map[point.0 as usize - 1][point.1 as usize] {
+        } else if point_map[point.0 as usize - 1][point.1 as usize] {
             neighbors[0] = COLLISION_FACTOR;
         }
-        if point.0 >= self.point_map.len() as u32 - 1 {
+        if point.0 >= point_map.len() as u32 - 1 {
             neighbors[1] = SIDE_FACTOR;
-        } else if self.point_map[point.0 as usize + 1][point.1 as usize] {
+        } else if point_map[point.0 as usize + 1][point.1 as usize] {
             neighbors[1] = COLLISION_FACTOR;
         }
-        if point.1 >= self.point_map[0].len() as u32 - 1 {
+        if point.1 >= point_map[0].len() as u32 - 1 {
             neighbors[2] = SIDE_FACTOR;
-        } else if self.point_map[point.0 as usize][point.1 as usize + 1] {
+        } else if point_map[point.0 as usize][point.1 as usize + 1] {
             neighbors[2] = COLLISION_FACTOR;
         }
         if point.1 <= 0 {
             neighbors[3] = SIDE_FACTOR;
-        } else if self.point_map[point.0 as usize][point.1 as usize - 1] {
+        } else if point_map[point.0 as usize][point.1 as usize - 1] {
             neighbors[3] = COLLISION_FACTOR;
         }
 
         neighbors
     }
 
-    fn random_walk(&mut self, pins: ((u32, u32), (u32, u32)), seed: Option<u64>) -> Connection {
+    fn random_walk(
+        &mut self,
+        pins: ((u32, u32), (u32, u32)),
+        seed: Option<u64>,
+        point_map: &mut Vec<Vec<bool>>,
+    ) -> Connection {
         let mut connection = Connection {
             start: pins.0,
             end: pins.1,
             segments: Vec::new(),
         };
 
-        self.mark_point(pins.1, false);
+        self.mark_point(pins.1, false, point_map);
 
         let mut actual_point = pins.0;
 
         let mut next_direction;
 
-        let mut probabilities = self.find_neighbors(connection.start);
+        let mut probabilities = self.find_neighbors(connection.start, point_map);
 
         let mut prob_sum = 0.;
         for i in 0..probabilities.len() {
@@ -126,21 +132,47 @@ impl Individual {
                 self,
                 &mut actual_point,
                 &mut random,
+                point_map,
             );
             next_direction = dir_holder;
             connection.segments.push(segment);
         }
 
-        self.mark_point(pins.1, true);
+        self.mark_point(pins.1, true, point_map);
 
         connection
     }
 
-    fn mark_point(&mut self, point: (u32, u32), val: bool) {
-        if self.point_map[point.0 as usize][point.1 as usize] && val == true {
-            self.collisions += 1;
-        };
-        self.point_map[point.0 as usize][point.1 as usize] = val;
+    fn mark_point(&mut self, point: (u32, u32), val: bool, point_map: &mut Vec<Vec<bool>>) {
+        point_map[point.0 as usize][point.1 as usize] = val;
+    }
+
+    fn collisions(&self) -> u32 {
+        // println!("start");
+        let mut points: HashMap<(u32, u32), bool> = HashMap::new();
+        let mut collisions = 0;
+        for point in self.collect_points() {
+            // println!("Punkt hashmapa {:?}", point);
+            if points.contains_key(&point) {
+                collisions += 1;
+            } else {
+                points.insert(point, true);
+            }
+        }
+
+        collisions
+    }
+
+    fn collect_points(&self) -> Vec<(u32, u32)> {
+        let mut points = vec![];
+        if self.connections.len() > 0 {
+            for i in 0..self.connections.len() {
+                points.append(&mut self.connections[i].following_points());
+            }
+        }
+        // println!("---");
+
+        points
     }
 
     pub fn evaluate(&self) -> f32 {
@@ -154,7 +186,7 @@ impl Individual {
             segment_number += connection.segments.len();
         }
 
-        self.collisions as f32 * WEIGHTS.0
+        self.collisions() as f32 * WEIGHTS.0
             + connection_length as f32 * WEIGHTS.1
             + segment_number as f32 * WEIGHTS.2
     }
@@ -169,10 +201,7 @@ impl Individual {
             if random.gen::<f32>() < mutation_chance {
                 connection.mutate_segment(
                     (random.gen::<f32>(), random.gen::<f32>()),
-                    (
-                        self.point_map.len() as u32,
-                        self.point_map[0].len() as u32,
-                    ),
+                    (self.dimensions.0 as u32, self.dimensions.1 as u32),
                 )
             }
         }
@@ -190,13 +219,11 @@ impl fmt::Display for Individual {
             })
         }
 
-        let mut character_map = vec![
+        let mut character_map =
             vec![
-                String::from('\u{2219}').color("white");
-                self.point_map.first().unwrap().len() as usize
+                vec![String::from('\u{2219}').color("white"); self.dimensions.1 as usize];
+                self.dimensions.0 as usize
             ];
-            self.point_map.len() as usize
-        ];
 
         let color = ["red", "green", "yellow", "blue", "magenta", "cyan", "white"];
 
@@ -324,6 +351,7 @@ impl Connection {
         individual: &mut Individual,
         actual_point: &mut (u32, u32),
         random: &mut StdRng,
+        point_map: &mut Vec<Vec<bool>>,
     ) -> (Segment, Option<Direction>) {
         let mut segment = Segment {
             length: 1,
@@ -333,7 +361,7 @@ impl Connection {
         *actual_point = move_direction(*actual_point, direction);
 
         while *actual_point != self.end {
-            let neighbors = individual.find_neighbors(*actual_point);
+            let neighbors = individual.find_neighbors(*actual_point, point_map);
             let mut connection_length: u32 = 0;
             for segment in self.segments.as_slice() {
                 connection_length += segment.length;
@@ -348,7 +376,7 @@ impl Connection {
             let roll: f32 = random.gen();
 
             if roll <= probabilities[0] {
-                individual.mark_point(*actual_point, true);
+                individual.mark_point(*actual_point, true, point_map);
                 match segment.direction {
                     North => {
                         segment.length += 1;
@@ -357,7 +385,7 @@ impl Connection {
                     _ => return (segment, Some(North)),
                 }
             } else if roll <= probabilities[0] + probabilities[1] {
-                individual.mark_point(*actual_point, true);
+                individual.mark_point(*actual_point, true, point_map);
                 match segment.direction {
                     South => {
                         segment.length += 1;
@@ -366,7 +394,7 @@ impl Connection {
                     _ => return (segment, Some(South)),
                 }
             } else if roll <= probabilities[0] + probabilities[1] + probabilities[2] {
-                individual.mark_point(*actual_point, true);
+                individual.mark_point(*actual_point, true, point_map);
                 match segment.direction {
                     East => {
                         segment.length += 1;
@@ -375,7 +403,7 @@ impl Connection {
                     _ => return (segment, Some(East)),
                 }
             } else {
-                individual.mark_point(*actual_point, true);
+                individual.mark_point(*actual_point, true, point_map);
                 match segment.direction {
                     West => {
                         segment.length += 1;
@@ -388,6 +416,57 @@ impl Connection {
 
         (segment, None)
     }
+
+    fn following_points(&self) -> Vec<(u32, u32)> {
+        fn segment_to_points(
+            actual_point: (u32, u32),
+            length: u32,
+            direction: Direction,
+        ) -> Vec<(u32, u32)> {
+            let mut points = vec![];
+            for i in 0..length {
+                let actual_point = match direction {
+                    North => (actual_point.0 - i, actual_point.1),
+                    South => (actual_point.0 + i, actual_point.1),
+                    East => (actual_point.0, actual_point.1 + i),
+                    West => (actual_point.0, actual_point.1 - i),
+                };
+                points.push(actual_point);
+            }
+            // println!("SEGMETNY: {:?}", points);
+            points
+        }
+
+        let mut points: Vec<(u32, u32)> = vec![];
+        let mut current_point: (u32, u32) = self.start.clone();
+        for segment in self.segments.as_slice() {
+            let mut segment_points;
+            match segment.direction {
+                North => {
+                    segment_points = segment_to_points(current_point, segment.length, North);
+                    current_point = (current_point.0 - segment.length, current_point.1);
+                }
+                South => {
+                    segment_points = segment_to_points(current_point, segment.length, South);
+                    current_point = (current_point.0 + segment.length, current_point.1);
+                }
+                East => {
+                    segment_points = segment_to_points(current_point, segment.length, East);
+                    current_point = (current_point.0, current_point.1 + segment.length);
+                }
+                West => {
+                    segment_points = segment_to_points(current_point, segment.length, West);
+                    current_point = (current_point.0, current_point.1 - segment.length);
+                }
+
+            };
+            points.append(&mut segment_points);
+        }
+        points.push(self.end);
+
+        points
+    }
+
 
     fn find_point(&self, index: usize) -> (u32, u32) {
         let mut point = self.start.clone();
@@ -407,7 +486,6 @@ impl Connection {
                 }
             }
         }
-
         point
     }
 
@@ -447,14 +525,19 @@ impl Connection {
         self.segments = new_segments;
     }
 
+    fn split_segment() {
+    }
+
     pub fn mutate_segment(&mut self, roll: (f32, f32), dimensions: (u32, u32)) {
         let index = (roll.0 * self.segments.len() as f32) as usize;
         let mutant: &Segment = &self.segments[index];
         let segment_point = self.find_point(index);
 
-        let mut mutation_value = (roll.1 * 4.) as u32 + 1;
+        let mut mutation_value = (roll.1 * dimensions.0 as f32) as u32 + 1;
         let direction: Option<Direction>;
         // println!("{}", index);
+
+
 
         match mutant.direction {
             North | South => {

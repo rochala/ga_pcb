@@ -14,10 +14,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 
 const CROSSOVER: f32 = 0.8;
-const MUTATION: f32 = 0.03;
-const ITERATIONS: u32 = 100;
-const POPULATION: usize = 1000;
-const BATCH_SIZE: usize = 20;
+const MUTATION: f32 = 0.10;
+const ITERATIONS: u32 = 1000;
+const POPULATION: usize = 10000;
+const BATCH_SIZE: usize = 3;
 
 pub struct Problem {
     dimensions: (u32, u32),
@@ -33,7 +33,7 @@ pub fn tournament_selection(
     batch_size: usize,
     random: &mut StdRng,
 ) -> Individual {
-    let mut tournament_batch: Vec<(Individual, f32)> = problem
+    let tournament_batch: Vec<(Individual, f32)> = problem
         .population
         .choose_multiple(random, batch_size)
         .cloned()
@@ -76,10 +76,15 @@ impl Problem {
             self.population.push((individual, points));
             bar.inc(1);
         }
-        bar.finish();
+        bar.finish_and_clear();
     }
 
-    pub fn genetic_search(&mut self, selector: FnType, cpus: Option<usize>, seed: Option<u64>) -> (Individual, f32) {
+    pub fn genetic_search(
+        &mut self,
+        selector: FnType,
+        cpus: Option<usize>,
+        seed: Option<u64>,
+    ) -> (Individual, f32) {
         let mut random = match seed {
             Some(seed) => StdRng::seed_from_u64(seed),
             None => StdRng::from_entropy(),
@@ -108,10 +113,31 @@ impl Problem {
             }
             self.population = new_population;
             bar.inc(1);
+            println!(
+                "{}",
+                self.population
+                    .iter()
+                    .min_by(|item1, item2| (item1.1.partial_cmp(&item2.1)).unwrap())
+                    .unwrap()
+                    .0
+            );
+            println!(
+                "{}",
+                self.population
+                    .iter()
+                    .min_by(|item1, item2| (item1.1.partial_cmp(&item2.1)).unwrap())
+                    .unwrap()
+                    .1
+            );
         }
 
+        bar.finish_and_clear();
 
-       self.population.iter().min_by(|item1, item2| (item1.1.partial_cmp(&item2.1)).unwrap()).unwrap().clone()
+        self.population
+            .iter()
+            .min_by(|item1, item2| (item1.1.partial_cmp(&item2.1)).unwrap())
+            .unwrap()
+            .clone()
     }
 
     pub fn random_search(&mut self, iterations: u64, cpus: Option<usize>) -> (Individual, u128) {
